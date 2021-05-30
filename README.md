@@ -1,11 +1,18 @@
 # pdnsmasq
-Update A record in PowerDNS via API from dnsmasq DHCP script
+Add or delete A record in PowerDNS via API invoked by Dnsmasq on every DHCP lease, expire or update.
 
-
-In the Dnsmasq configuration, add
+### Setup
+Configure Dnsmasq as DHCP server and point the `dhcp-script` to the pdnsmasq script like
+```
 dhcp-script=/usr/local/bin/pdnsmasq
+```
 
 
-
-dnsmasq runs the script 
-'old', 'c4:06:83:96:73:0a', '10.0.0.114', 'HUAWEI_P30_Pro-2a326f8f81'
+Dnsmasq calls the script with the following arguments
+```
+<add|del|old> <MAC address> <IP address> (<Client-Hostname>)
+```
+like
+```
+add c4:06:84:97:73:2a 10.11.12.14 Client-Host
+```
