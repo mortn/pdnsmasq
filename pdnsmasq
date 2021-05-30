@@ -17,11 +17,12 @@ log.setLevel(logging.DEBUG)
 
 class PDNSMASQ(object):
     def __init__(self):
-        self.recordType = 'A'
-        self.priority = 0
-        self.disabled = False
-        self.setPTR = 'false'
+
+        # Configure parameters
         self.config()
+
+        # Add or delete the record, otherwise exit
+        self.action = argv[1] if argv[1] in ['add','del'] else exit()
 
         # Set record content from valid IP address or exit
         self.content  = argv[3] if self.valid_ip(argv[3]) else None
@@ -29,26 +30,23 @@ class PDNSMASQ(object):
             log.info('Invalid IP address. Adios')
             exit()
 
-        self.set_hostname()
+        
+        # Set DNS hostname of the current client
+        self.set_dns_record()
 
-        #self.set_payload()
+        # Construct the payload
+        self.set_payload()
 
-        # What are we doing. Dnsmasq sends action as first arg
-        if argv[1] in ['add']:
-            self.add_record()
-        elif argv[1] == 'del':
-            self.del_record()
-        else:
-            log.info('Got passive-aggressive none-action?!')
-            exit()
+        # Execute the API request
+        self.apipatch()
 
     def config(self):
         try:
-            # Some settings we get from the environment
+            # Get some settings from the environment
             self.zone = environ.get('DNSMASQ_DOMAIN')
             self.ttl = environ.get('DNSMASQ_TIME_REMAINING', 3600)
 
-            # Read Pdns settings 
+            # Load Pdns settings+secrets
             with open(f'{__file__}.json') as f: cfg_data = f.read()
             cfg = json.loads(cfg_data, object_hook=lambda d: SimpleNamespace(**d))
             self.macaddr = argv[2]
@@ -62,85 +60,48 @@ class PDNSMASQ(object):
             log.error(type(e),e)
 
     def set_payload(self):
+        self.recordType = 'A'
+        self.priority = 0
+        self.disabled = False
+        self.setPTR = 'false'
         if argv[1] in ['add']:
-            payload = {
-            'rrsets': [{
-                'name': self.dns_record, 
-                'type': self.recordType,
-                'ttl': int(self.ttl), 
-                'changetype': 'REPLACE',
-                'records': [{
-                    'content': self.content,
-                    'disabled': self.disabled,
+            self.payload = {
+                'rrsets': [{
                     'name': self.dns_record,
-                    'ttl': int(self.ttl),
-                    'set-ptr': self.setPTR,
                     'type': self.recordType,
-                    'priority': self.priority}]}]}
+                    'changetype': 'REPLACE',
+                    'ttl': int(self.ttl),
+                    'records': [{
+                        'content': self.content,
+                        'disabled': self.disabled,
+                        'name': self.dns_record,
+                        'ttl': int(self.ttl),
+                        'set-ptr': self.setPTR,
+                        'type': self.recordType,
+                        'priority': self.priority}]}]}
 
         elif argv[1] == 'del':
-            payload = {
-            'rrsets': [{
-                'name': self.dns_record,
-                'type': self.recordType,
-                'changetype': 'DELETE'}]}
-
-    def add_record(self):
-        try:
-            payload = {
-            'rrsets': [{'name': self.dns_record, 
-                'type': self.recordType,
-                'ttl': int(self.ttl), 
-                'changetype': 'REPLACE',
-                'records': [{
-                    'content': self.content,
-                    'disabled': self.disabled,
+            self.payload = {
+                'rrsets': [{
                     'name': self.dns_record,
-                    'ttl': int(self.ttl),
-                    'set-ptr': self.setPTR,
                     'type': self.recordType,
-                    'priority': self.priority}]}]}
-            r = (requests.patch(self.uri, data=json.dumps(payload),headers=self.headers))
+                    'changetype': 'DELETE'}]}
 
-            if r.status_code not in [200, 204]:
-                return_msg = {
-                    'status_code': r.status_code,
-                    'error': r.json().get('error'),
-                    'payload': payload}
-                log.debug(json.dumps(return_msg))
-            else:
-                return_msg = {
-                    'status_code': r.status_code,
-                    'msg': f'{self.dns_record} added/updated'
-                }
-                log.debug(json.dumps(return_msg))
-        except Exception as e:
-            log.error(type(e),e)
-
-    def del_record(self):
+    def apipatch(self):
         try:
-            payload = {'rrsets': [{
-                'name': self.dns_record,
-                'type': self.recordType,
-                'changetype': 'DELETE'}]}
-            r = (requests.patch(self.uri, data=json.dumps(payload),headers=self.headers))
-
+            log.debug(self.payload)
+            r = requests.patch(
+                    self.uri,
+                    data=json.dumps(self.payload),
+                    headers=self.headers
+                )
             if r.status_code not in [200, 204]:
-                return_msg = {
-                    'status_code': r.status_code,
-                    'error': r.json().get('error'),
-                    'payload': payload}
-                log.debug(json.dumps(return_msg))
+                log.error([r.status_code,self.uri,self.payload])
             else:
-                return_msg = {
-                    'status_code': r.status_code,
-                    'msg': f'{self.dns_record} added/updated'
-                }
-                log.debug(json.dumps(return_msg))
+                log.info(f'{self.dns_record} updated')
         except Exception as e:
-            log.error(type(e),e)
-    
-        
+            log.error(type(e),e)        
+
     def valid_ip(self,addr):
         try:
             inet_aton(addr)
@@ -148,15 +109,14 @@ class PDNSMASQ(object):
         except:
             return False
 
-    def set_hostname(self):
+    def set_dns_record(self):
         hostname = argv[4] if len(argv)==5 else f"x{self.macaddr[-8:].replace(':','')}"
         self.dns_record = f"{hostname}.{self.zone}."
-
 
 if __name__ == "__main__":
   log.debug(argv)
   # Pre-flight check
-  if len(argv) >= 4: 
+  if len(argv) >= 4:
     PDNSMASQ()
 
 
